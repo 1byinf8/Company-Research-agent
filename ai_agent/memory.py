@@ -1,9 +1,12 @@
 """
-Conversation memory and state management.
+Conversation memory and state management with SQLite persistence.
 """
 import uuid
+import sqlite3
+import json
 from datetime import datetime
 from typing import Optional
+from pathlib import Path
 from .models import (
     ConversationState, 
     ConversationMessage, 
@@ -11,34 +14,76 @@ from .models import (
     ResearchStatus
 )
 
+DB_PATH = "research_agent.db"
 
 class ConversationMemory:
     """
-    Manages conversation state and history.
-    In production, this would be backed by a database.
+    Manages conversation state and history using SQLite for persistence.
     """
     
     def __init__(self):
-        self.sessions: dict[str, ConversationState] = {}
+        self._init_db()
     
+    def _init_db(self):
+        """Initialize the SQLite database and create tables."""
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    data TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+
+    def _save_session(self, session: ConversationState):
+        """Serialize and save session state to DB."""
+        # model_dump_json() handles datetime serialization automatically
+        json_data = session.model_dump_json()
+        
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO sessions (session_id, data, updated_at) 
+                VALUES (?, ?, ?)
+                """,
+                (session.session_id, json_data, datetime.now())
+            )
+            conn.commit()
+
     def create_session(self) -> str:
         """Create a new conversation session."""
         session_id = str(uuid.uuid4())
-        self.sessions[session_id] = ConversationState(session_id=session_id)
+        session = ConversationState(session_id=session_id)
+        self._save_session(session)
         return session_id
     
     def get_session(self, session_id: str) -> Optional[ConversationState]:
         """Get existing session or None."""
-        return self.sessions.get(session_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.execute("SELECT data FROM sessions WHERE session_id = ?", (session_id,))
+            row = cursor.fetchone()
+            
+            if row:
+                try:
+                    return ConversationState.model_validate_json(row[0])
+                except Exception as e:
+                    print(f"Error parsing session {session_id}: {e}")
+                    return None
+        return None
     
     def get_or_create_session(self, session_id: Optional[str] = None) -> ConversationState:
         """Get existing session or create new one."""
-        if session_id and session_id in self.sessions:
-            return self.sessions[session_id]
+        if session_id:
+            session = self.get_session(session_id)
+            if session:
+                return session
         
+        # Create new if not found or not provided
         new_id = session_id or str(uuid.uuid4())
-        self.sessions[new_id] = ConversationState(session_id=new_id)
-        return self.sessions[new_id]
+        session = ConversationState(session_id=new_id)
+        self._save_session(session)
+        return session
     
     def add_message(
         self, 
@@ -59,6 +104,7 @@ class ConversationMemory:
             metadata=metadata or {}
         )
         session.messages.append(message)
+        self._save_session(session)
         return message
     
     def get_history(
@@ -113,6 +159,7 @@ class ConversationMemory:
         session = self.get_session(session_id)
         if session:
             session.current_company = company
+            self._save_session(session)
     
     def get_current_company(self, session_id: str) -> Optional[str]:
         """Get the company being researched."""
@@ -124,6 +171,7 @@ class ConversationMemory:
         session = self.get_session(session_id)
         if session:
             session.current_plan = plan
+            self._save_session(session)
     
     def get_plan(self, session_id: str) -> Optional[AccountPlan]:
         """Get the current account plan."""
@@ -135,6 +183,7 @@ class ConversationMemory:
         session = self.get_session(session_id)
         if session:
             session.research_status = status
+            self._save_session(session)
     
     def get_research_status(self, session_id: str) -> ResearchStatus:
         """Get current research status."""
@@ -146,6 +195,7 @@ class ConversationMemory:
         session = self.get_session(session_id)
         if session:
             session.user_context[key] = value
+            self._save_session(session)
     
     def get_user_context(self, session_id: str, key: str) -> any:
         """Get user context value."""
@@ -156,8 +206,9 @@ class ConversationMemory:
     
     def clear_session(self, session_id: str):
         """Clear a session completely."""
-        if session_id in self.sessions:
-            del self.sessions[session_id]
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            conn.commit()
     
     def get_session_summary(self, session_id: str) -> dict:
         """Get a summary of the session state."""
@@ -173,6 +224,24 @@ class ConversationMemory:
             "research_status": session.research_status.value,
             "user_context": session.user_context
         }
+    
+    def get_all_sessions(self) -> list[dict]:
+        """List all available sessions (useful for history UI)."""
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.execute("SELECT session_id, data, updated_at FROM sessions ORDER BY updated_at DESC")
+            sessions = []
+            for row in cursor:
+                try:
+                    data = json.loads(row[1])
+                    sessions.append({
+                        "session_id": row[0],
+                        "company": data.get("current_company"),
+                        "updated_at": row[2],
+                        "msg_count": len(data.get("messages", []))
+                    })
+                except:
+                    continue
+            return sessions
 
 
 # Singleton instance for simple usage

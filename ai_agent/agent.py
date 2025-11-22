@@ -100,12 +100,16 @@ class ResearchAgent:
         formatted_results = format_results_for_llm(all_results)
         conflicts = await self.detect_conflicts(company_name, formatted_results)
         
+        # Save research data immediately, as we might pause
+        self.memory.set_user_context(session_id, "research_data", formatted_results)
+        self.memory.set_user_context(session_id, "focus_area", focus_area)
+
         if conflicts.get("conflicts_found"):
             self.memory.set_research_status(session_id, ResearchStatus.CONFLICT_FOUND)
             yield {"type": "conflicts", "conflicts": conflicts["conflicts"], "recommendation": conflicts["recommendation"]}
-        
-        self.memory.set_user_context(session_id, "research_data", formatted_results)
-        self.memory.set_user_context(session_id, "focus_area", focus_area)
+            yield {"type": "message", "content": "I found some conflicting information (see above). How would you like me to proceed?"}
+            # Return here to pause execution and await user input
+            return
         
         yield {"type": "status", "message": "Research complete. Generating account plan...", "progress": 80}
         self.memory.set_research_status(session_id, ResearchStatus.COMPLETED)
@@ -231,6 +235,23 @@ class ResearchAgent:
         """Main conversation handler - routes to appropriate actions."""
         session = self.memory.get_or_create_session(session_id)
         self.memory.add_message(session_id, "user", user_message)
+
+        # Check for CONFLICT_FOUND status first
+        if session.research_status == ResearchStatus.CONFLICT_FOUND:
+            yield {"type": "status", "message": "Resolving conflicts with user feedback...", "progress": 80}
+            
+            # Append user resolution to the existing research context
+            current_data = self.memory.get_user_context(session_id, "research_data")
+            updated_data = f"{current_data}\n\nUSER RESOLUTION/FEEDBACK:\n{user_message}"
+            self.memory.set_user_context(session_id, "research_data", updated_data)
+            
+            # Resume the workflow
+            yield {"type": "message", "content": "Thanks for the clarification. Proceeding with the account plan generation..."}
+            self.memory.set_research_status(session_id, ResearchStatus.COMPLETED)
+            
+            async for update in self.generate_plan(session_id):
+                yield update
+            return # End turn
         
         intent_result = await self.classify_intent(session_id, user_message)
         intent = intent_result.get("intent", "GENERAL_CHAT")
@@ -249,8 +270,10 @@ class ResearchAgent:
             async for update in self.research_company(session_id, company_name, focus_area):
                 yield update
             
-            async for update in self.generate_plan(session_id):
-                yield update
+            # Only generate plan if we didn't pause for conflicts
+            if self.memory.get_research_status(session_id) != ResearchStatus.CONFLICT_FOUND:
+                async for update in self.generate_plan(session_id):
+                    yield update
         
         elif intent == "EDIT_SECTION":
             section = intent_result.get("section_to_edit")
@@ -295,6 +318,14 @@ class ResearchAgent:
         history = self.memory.get_history_string(session_id, limit=6)
         plan_status = "Generated" if session.current_plan else "Not yet generated"
         
+        # CRITICAL FIX: Inject the actual plan content into the context
+        plan_context = ""
+        if session.current_plan:
+            # Dump the plan to JSON so the LLM can read it
+            # excluding 'research_data' usually helps reduce noise, but here we dump the plan model
+            plan_json = session.current_plan.model_dump_json()
+            plan_context = f"\n\nCURRENT ACCOUNT PLAN DATA:\n{plan_json}\n"
+
         system_prompt = CONVERSATION_PROMPT.format(
             current_company=session.current_company or "None",
             plan_status=plan_status,
@@ -302,6 +333,10 @@ class ResearchAgent:
             conversation_history=history,
             user_message=user_message
         )
+        
+        # Add the plan content to the system prompt
+        if plan_context:
+            system_prompt += plan_context
         
         if extra_context:
             system_prompt += f"\n\nAdditional context:\n{extra_context}"
