@@ -30,6 +30,11 @@ class ResearchAgent:
         self.search = TavilySearchTool(api_key=tavily_api_key)
         self.memory = memory
     
+    # Helper to save and yield message
+    async def _respond(self, session_id: str, content: str) -> dict:
+        self.memory.add_message(session_id, "assistant", content)
+        return {"type": "message", "content": content}
+
     async def classify_intent(self, session_id: str, user_message: str) -> dict:
         """Classify user intent from their message."""
         session = self.memory.get_or_create_session(session_id)
@@ -106,8 +111,21 @@ class ResearchAgent:
 
         if conflicts.get("conflicts_found"):
             self.memory.set_research_status(session_id, ResearchStatus.CONFLICT_FOUND)
+            
+            # --- PERSISTENCE FIX START ---
+            # Save conflict data to memory so it persists on reload
+            self.memory.add_message(
+                session_id, 
+                "system", 
+                "Conflicts found during research:", 
+                metadata={"conflicts": conflicts["conflicts"]}
+            )
+            # --- PERSISTENCE FIX END ---
+
             yield {"type": "conflicts", "conflicts": conflicts["conflicts"], "recommendation": conflicts["recommendation"]}
-            yield {"type": "message", "content": "I found some conflicting information (see above). How would you like me to proceed?"}
+            
+            # Save and yield message
+            yield await self._respond(session_id, "I found some conflicting information (see above). How would you like me to proceed?")
             # Return here to pause execution and await user input
             return
         
@@ -246,7 +264,7 @@ class ResearchAgent:
             self.memory.set_user_context(session_id, "research_data", updated_data)
             
             # Resume the workflow
-            yield {"type": "message", "content": "Thanks for the clarification. Proceeding with the account plan generation..."}
+            yield await self._respond(session_id, "Thanks for the clarification. Proceeding with the account plan generation...")
             self.memory.set_research_status(session_id, ResearchStatus.COMPLETED)
             
             async for update in self.generate_plan(session_id):
@@ -265,7 +283,7 @@ class ResearchAgent:
             existing_focus = self.memory.get_user_context(session_id, "focus_area")
             focus_area = extracted_focus if extracted_focus else existing_focus
             
-            yield {"type": "message", "content": f"Starting research on {company_name}...\n\n"}
+            yield await self._respond(session_id, f"Starting research on {company_name}...\n\n")
             
             async for update in self.research_company(session_id, company_name, focus_area):
                 yield update
@@ -278,7 +296,8 @@ class ResearchAgent:
         elif intent == "EDIT_SECTION":
             section = intent_result.get("section_to_edit")
             instructions = intent_result.get("edit_instructions") or user_message
-            yield {"type": "message", "content": f"Updating the {section} section...\n"}
+            yield await self._respond(session_id, f"Updating the {section} section...\n")
+            
             result = await self.edit_section(session_id, section, instructions)
             if result.get("success"):
                 yield {"type": "section_updated", "section": section, "content": result["updated_content"]}
@@ -290,27 +309,27 @@ class ResearchAgent:
                 async for update in self.generate_plan(session_id):
                     yield update
             else:
-                yield {"type": "message", "content": "I don't have any research data yet. Which company would you like me to research?"}
+                yield await self._respond(session_id, "I don't have any research data yet. Which company would you like me to research?")
         
         elif intent == "OFF_TOPIC":
             response = await self._generate_conversation_response(
                 session_id, user_message, 
                 extra_context="User is off-topic. Gently redirect to company research."
             )
-            yield {"type": "message", "content": response}
+            yield await self._respond(session_id, response)
         
         elif intent == "CLARIFICATION_NEEDED":
             response = await self._generate_conversation_response(session_id, user_message, extra_context=CONFUSED_USER_HANDLER)
-            yield {"type": "message", "content": response}
+            yield await self._respond(session_id, response)
         
         elif intent == "GENERAL_CHAT" or intent == "ASK_QUESTION":
             # Handle general chat without triggering research
             response = await self._generate_conversation_response(session_id, user_message)
-            yield {"type": "message", "content": response}
+            yield await self._respond(session_id, response)
         
         else:
             response = await self._generate_conversation_response(session_id, user_message)
-            yield {"type": "message", "content": response}
+            yield await self._respond(session_id, response)
     
     async def _generate_conversation_response(self, session_id: str, user_message: str, extra_context: str = "") -> str:
         """Generate a conversational response."""

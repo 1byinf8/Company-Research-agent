@@ -32,10 +32,12 @@ function App() {
   const [showPlan, setShowPlan] = useState(false)
   const [editingSection, setEditingSection] = useState(null)
   const [editInput, setEditInput] = useState('')
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   
   const wsRef = useRef(null)
   const messagesEndRef = useRef(null)
   const currentResponseRef = useRef('')
+  const inputRef = useRef(null) // --- NEW: Ref for auto-focus ---
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -44,6 +46,14 @@ function App() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // --- NEW: Auto-focus input when session changes or loading finishes ---
+  useEffect(() => {
+    if (!isLoading && inputRef.current) {
+        // Small timeout to ensure DOM is ready and accessible
+        setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [sessionId, isLoading]);
 
   // 1. Fetch Session List on Mount
   const fetchSessions = async () => {
@@ -124,6 +134,32 @@ function App() {
       }
     } catch (e) {
       console.error("Failed to create session", e)
+    }
+  }
+  
+  const deleteSession = async (e, idToDelete) => {
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this session?")) return;
+    
+    try {
+        const res = await fetch(`${API_URL}/session/${idToDelete}`, { method: 'DELETE' });
+        if (res.ok) {
+            setSessions(prev => prev.filter(s => s.session_id !== idToDelete));
+            // If we deleted the current session, switch to another or create new
+            if (sessionId === idToDelete) {
+                const remaining = sessions.filter(s => s.session_id !== idToDelete);
+                if (remaining.length > 0) {
+                    setSessionId(remaining[0].session_id);
+                } else {
+                    setSessionId(null);
+                    setMessages([]);
+                    setPlan(null);
+                    createNewSession();
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Failed to delete session", e);
     }
   }
 
@@ -216,6 +252,9 @@ function App() {
     <div className="app">
       <header className="header">
         <div className="header-title">
+          <button className="btn-icon toggle-sidebar" onClick={() => setSidebarOpen(!sidebarOpen)}>
+            ☰
+          </button>
           <div className="header-logo">CR</div>
           <h1>Company Research Assistant</h1>
         </div>
@@ -233,7 +272,7 @@ function App() {
 
       <div className="main-content">
         {/* Sidebar for Sessions */}
-        <div className="sidebar">
+        <div className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
           <div className="sidebar-header">
             <h3>History</h3>
           </div>
@@ -244,13 +283,22 @@ function App() {
                 className={`session-item ${s.session_id === sessionId ? 'active' : ''}`}
                 onClick={() => setSessionId(s.session_id)}
               >
-                <div className="session-name">
-                  {s.company || "New Research"}
+                <div className="session-content-wrapper">
+                    <div className="session-name">
+                    {s.company || "New Research"}
+                    </div>
+                    <div className="session-meta">
+                    <span>{formatDate(s.updated_at)}</span>
+                    <span>{s.msg_count} msgs</span>
+                    </div>
                 </div>
-                <div className="session-meta">
-                  <span>{formatDate(s.updated_at)}</span>
-                  <span>{s.msg_count} msgs</span>
-                </div>
+                <button 
+                    className="delete-session-btn"
+                    onClick={(e) => deleteSession(e, s.session_id)}
+                    title="Delete Session"
+                >
+                    ×
+                </button>
               </div>
             ))}
           </div>
@@ -278,15 +326,19 @@ function App() {
                 </div>
                 <div className="content">
                   <Linkify text={msg.content} />
-                  {msg.conflicts && (
+                  
+                  {/* --- MODIFIED: Render Conflicts from WebSocket (msg.conflicts) OR History (msg.metadata.conflicts) --- */}
+                  {(msg.conflicts || (msg.metadata && msg.metadata.conflicts)) && (
                     <ul style={{ marginTop: '0.5rem', paddingLeft: '1rem' }}>
-                      {msg.conflicts.map((c, j) => (
+                      {(msg.conflicts || msg.metadata.conflicts).map((c, j) => (
                         <li key={j} style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>
                           <strong>{c.topic}:</strong> {c.suggested_resolution}
                         </li>
                       ))}
                     </ul>
                   )}
+                  {/* ---------------------------------------------------------------------------------------------------- */}
+
                 </div>
               </div>
             ))}
@@ -313,6 +365,7 @@ function App() {
           
           <div className="input-area">
             <textarea
+              ref={inputRef} /* --- NEW: Attach ref here --- */
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
