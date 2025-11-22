@@ -24,7 +24,7 @@ Current context:
 User message: {user_message}
 
 Respond with ONLY a JSON object (no markdown):
-{{"intent": "<INTENT_TYPE>", "company_name": "<extracted company name or null>", "section_to_edit": "<section name if EDIT_SECTION else null>", "edit_instructions": "<what to change if EDIT_SECTION else null>", "confidence": <0.0 to 1.0>}}"""
+{{"intent": "<INTENT_TYPE>", "company_name": "<extracted company name or null>", "focus_area": "<extracted specific context/angle or null>", "section_to_edit": "<section name if EDIT_SECTION else null>", "edit_instructions": "<what to change if EDIT_SECTION else null>", "confidence": <0.0 to 1.0>}}"""
 
 
 RESEARCH_ORCHESTRATOR_PROMPT = """You are a research orchestrator for company account planning.

@@ -71,7 +71,6 @@ function App() {
         break
         
       case 'research_update':
-        // Don't add system messages for research updates - just update progress
         break
         
       case 'conflicts':
@@ -123,6 +122,7 @@ function App() {
     setInput('')
   }
 
+  // FIXED: Corrected function name from constZCKeyPress to handleKeyPress
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -318,13 +318,48 @@ function App() {
 }
 
 function PlanSection({ title, sectionKey, data, onEdit, isEditing, editInput, setEditInput, onSubmitEdit, onCancelEdit }) {
+  
+  // Helper to render list items nicely
+  const renderObjectItem = (item) => {
+    // Competitor
+    if (item.name && item.differentiator) {
+      return (
+        <span>
+          <strong>{item.name}</strong>: {item.differentiator}
+        </span>
+      )
+    }
+    // News Item
+    if (item.title && item.summary) {
+      return (
+        <span>
+          <strong>{item.title}</strong> {item.date && <span style={{color: 'var(--text-muted)', fontSize: '0.9em'}}>({item.date})</span>}<br/>
+          <span style={{display: 'block', marginTop: '4px'}}>{item.summary}</span>
+        </span>
+      )
+    }
+    // Leader
+    if (item.name && item.title) {
+      return (
+        <span>
+          <strong>{item.name}</strong> ({item.title})
+          {item.background && <><br/><span style={{fontSize: '0.9em', color: 'var(--text-secondary)'}}>{item.background}</span></>}
+        </span>
+      )
+    }
+    // Fallback
+    return JSON.stringify(item)
+  }
+
   const renderValue = (value) => {
     if (Array.isArray(value)) {
       if (value.length === 0) return <em>No data available</em>
       return (
-        <ul>
+        <ul style={{paddingLeft: '1.2rem'}}>
           {value.map((item, i) => (
-            <li key={i}>{typeof item === 'object' ? JSON.stringify(item) : item}</li>
+            <li key={i} style={{marginBottom: '0.5rem'}}>
+              {typeof item === 'object' && item !== null ? renderObjectItem(item) : item}
+            </li>
           ))}
         </ul>
       )
@@ -363,7 +398,7 @@ function PlanSection({ title, sectionKey, data, onEdit, isEditing, editInput, se
           {data && Object.entries(data).map(([key, value]) => (
             <div key={key} className="field">
               <span className="field-label">{key.replace(/_/g, ' ')}</span>
-              <span className="field-value">{renderValue(value)}</span>
+              <div className="field-value">{renderValue(value)}</div>
             </div>
           ))}
         </div>

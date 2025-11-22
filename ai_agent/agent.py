@@ -132,6 +132,32 @@ class ResearchAgent:
         try:
             plan_data = await self.llm.generate_json(prompt, temperature=0.4, retries=4)
             
+            # Helper to sanitize list fields that might come back as strings
+            def sanitize_list_fields(section_data: dict, fields: list[str]):
+                if not isinstance(section_data, dict):
+                    return
+                for field in fields:
+                    if field in section_data:
+                        val = section_data[field]
+                        if val is None:
+                            section_data[field] = []
+                        elif isinstance(val, str):
+                            # If LLM returns "Not available", "None", etc., make it an empty list
+                            if val.lower() in ["not available", "none", "n/a", "unknown"]:
+                                section_data[field] = []
+                            else:
+                                # Otherwise wrap the string in a list
+                                section_data[field] = [val]
+
+            # Apply sanitization to all sections with list fields
+            sanitize_list_fields(plan_data.get("business_model"), ["core_products", "revenue_streams"])
+            sanitize_list_fields(plan_data.get("recent_news"), ["items", "key_themes"])
+            sanitize_list_fields(plan_data.get("leadership"), ["executives"])
+            sanitize_list_fields(plan_data.get("market_position"), ["competitors", "competitive_advantages", "competitive_weaknesses"])
+            sanitize_list_fields(plan_data.get("financial_health"), ["public_metrics"])
+            sanitize_list_fields(plan_data.get("pain_points"), ["challenges", "industry_pressures", "opportunities"])
+            sanitize_list_fields(plan_data.get("engagement_strategy"), ["talking_points", "potential_objections", "recommended_contacts"])
+
             # Build plan with safe defaults
             def safe_get(d, key, default):
                 return d.get(key, default) if d else default
@@ -154,7 +180,8 @@ class ResearchAgent:
             
             self.memory.set_plan(session_id, plan)
             yield {"type": "status", "message": "Account plan generated successfully.", "progress": 100}
-            yield {"type": "plan_complete", "plan": plan.model_dump()}
+            # Use mode='json' to serialize datetimes safely
+            yield {"type": "plan_complete", "plan": plan.model_dump(mode='json')}
             
         except Exception as e:
             yield {"type": "error", "message": f"Failed to generate plan: {str(e)}"}
@@ -179,7 +206,7 @@ class ResearchAgent:
         if not attr_name:
             return {"error": f"Unknown section: {section_name}"}
         
-        current_content = getattr(plan, attr_name).model_dump()
+        current_content = getattr(plan, attr_name).model_dump(mode='json')
         
         additional_research = ""
         if "more detail" in edit_instructions.lower() or "expand" in edit_instructions.lower():
@@ -208,11 +235,15 @@ class ResearchAgent:
         intent_result = await self.classify_intent(session_id, user_message)
         intent = intent_result.get("intent", "GENERAL_CHAT")
         company_name = intent_result.get("company_name")
+        extracted_focus = intent_result.get("focus_area")
         
         yield {"type": "intent", "intent": intent, "confidence": intent_result.get("confidence", 0)}
         
         if intent == "START_RESEARCH" and company_name:
-            focus_area = self.memory.get_user_context(session_id, "focus_area")
+            # Use specific focus if extracted, otherwise fall back to memory
+            existing_focus = self.memory.get_user_context(session_id, "focus_area")
+            focus_area = extracted_focus if extracted_focus else existing_focus
+            
             yield {"type": "message", "content": f"Starting research on {company_name}...\n\n"}
             
             async for update in self.research_company(session_id, company_name, focus_area):
