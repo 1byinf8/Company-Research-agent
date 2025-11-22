@@ -56,6 +56,83 @@ class ResearchAgent:
                 "confidence": 0.5,
                 "error": str(e)
             }
+        
+    async def validate_company(self, company_name: str) -> dict:
+        """
+        Validate if a company actually exists before starting research.
+        Prevents researching wrong/similar-named companies.
+        """
+        query = f'"{company_name}" company official'
+        
+        try:
+            result = await self.search.search(query, search_depth="basic", max_results=5)
+            
+            if not result.results or len(result.results) == 0:
+                return {
+                    "exists": False,
+                    "official_name": None,
+                    "message": f"I couldn't find any company called '{company_name}'. Please check the spelling or provide the full company name."
+                }
+            
+            # Build context from search results
+            results_text = "\n".join([
+                f"- {r.title}: {r.content[:300]}" 
+                for r in result.results[:5]
+            ])
+            
+            validation_prompt = f"""You are validating if "{company_name}" is a real company.
+
+    Search results:
+    {results_text}
+
+    IMPORTANT RULES:
+    1. The company name must be an EXACT or VERY CLOSE match (minor typos OK)
+    2. If search results are about a DIFFERENT company (e.g., user said "kalrotpedia" but results show "Ballotpedia"), return exists: false
+    3. If the company genuinely exists with correct/similar spelling, return exists: true
+    4. Be STRICT - don't assume similar-sounding names are the same company
+
+    Respond with ONLY valid JSON:
+    {{
+        "exists": true or false,
+        "official_name": "exact official company name if exists, else null",
+        "is_different_company": true or false (true if results are about a different company),
+        "found_company": "name of company actually found in results",
+        "reason": "brief explanation"
+    }}"""
+
+            validation = await self.llm.generate_json(validation_prompt, temperature=0.1)
+            
+            # Check if search found a DIFFERENT company
+            if validation.get("is_different_company", False):
+                found = validation.get("found_company", "a different company")
+                return {
+                    "exists": False,
+                    "official_name": None,
+                    "message": f"I couldn't find '{company_name}'. Did you mean '{found}'? Please confirm the exact company name you want to research."
+                }
+            
+            if not validation.get("exists", False):
+                return {
+                    "exists": False,
+                    "official_name": None,
+                    "message": f"I couldn't verify '{company_name}' as a real company. {validation.get('reason', '')} Please check the name and try again."
+                }
+            
+            return {
+                "exists": True,
+                "official_name": validation.get("official_name") or company_name,
+                "message": None
+            }
+            
+        except Exception as e:
+            print(f"Validation error: {e}")
+            # On error, ask user to confirm rather than proceeding blindly
+            return {
+                "exists": False,
+                "official_name": None,
+                "message": f"I had trouble verifying '{company_name}'. Could you confirm this is the correct company name?"
+            }
+
     
     async def generate_research_queries(self, company_name: str, focus_area: Optional[str] = None) -> list[dict]:
         """Generate search queries for company research."""
@@ -279,7 +356,28 @@ class ResearchAgent:
         yield {"type": "intent", "intent": intent, "confidence": intent_result.get("confidence", 0)}
         
         if intent == "START_RESEARCH" and company_name:
-            # Use specific focus if extracted, otherwise fall back to memory
+            # === COMPANY VALIDATION - MUST HAPPEN FIRST ===
+            yield {"type": "status", "message": f"Verifying '{company_name}' exists...", "progress": 2}
+            
+            validation = await self.validate_company(company_name)
+            
+            if not validation["exists"]:
+                # Company doesn't exist or found different company - STOP HERE
+                yield await self._respond(session_id, validation["message"])
+                return  # Don't proceed with research
+            
+            # Use the official/verified name
+            verified_name = validation["official_name"] or company_name
+            
+            # If name was corrected, inform user
+            if verified_name.lower() != company_name.lower():
+                yield await self._respond(
+                    session_id, 
+                    f"Found as **{verified_name}**. Starting research..."
+                )
+                company_name = verified_name
+            
+            # === CONTINUE WITH RESEARCH ===
             existing_focus = self.memory.get_user_context(session_id, "focus_area")
             focus_area = extracted_focus if extracted_focus else existing_focus
             
@@ -288,7 +386,6 @@ class ResearchAgent:
             async for update in self.research_company(session_id, company_name, focus_area):
                 yield update
             
-            # Only generate plan if we didn't pause for conflicts
             if self.memory.get_research_status(session_id) != ResearchStatus.CONFLICT_FOUND:
                 async for update in self.generate_plan(session_id):
                     yield update
