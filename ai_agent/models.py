@@ -17,6 +17,7 @@ class UserIntent(str, Enum):
     OFF_TOPIC = "off_topic"
     GENERATE_PLAN = "generate_plan"
     EXPORT_PLAN = "export_plan"
+    GENERAL_CHAT = "general_chat"
 
 
 class ResearchStatus(str, Enum):
@@ -129,7 +130,6 @@ class AccountPlan(BaseModel):
     pain_points: PainPoints = Field(default_factory=PainPoints)
     engagement_strategy: EngagementStrategy = Field(default_factory=EngagementStrategy)
     
-    # Metadata
     sources: list[str] = Field(default_factory=list)
     conflicts_found: list[str] = Field(default_factory=list)
 
@@ -145,7 +145,7 @@ class ResearchProgress(BaseModel):
 
 class ConversationMessage(BaseModel):
     """Single message in conversation history."""
-    role: str  # "user" or "assistant"
+    role: str
     content: str
     timestamp: datetime = Field(default_factory=datetime.now)
     metadata: dict = Field(default_factory=dict)
@@ -158,4 +158,4 @@ class ConversationState(BaseModel):
     current_company: Optional[str] = None
     current_plan: Optional[AccountPlan] = None
     research_status: ResearchStatus = ResearchStatus.IDLE
-    user_context: dict = Field(default_factory=dict)  # Store user preferences, focus areas
+    user_context: dict = Field(default_factory=dict)

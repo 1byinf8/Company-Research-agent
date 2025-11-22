@@ -23,26 +23,15 @@ from .prompts import (
 
 
 class ResearchAgent:
-    """
-    Main orchestrator for the Company Research Assistant.
-    Handles conversation flow, research coordination, and plan generation.
-    """
+    """Main orchestrator for the Company Research Assistant."""
     
-    def __init__(
-        self,
-        gemini_api_key: Optional[str] = None,
-        tavily_api_key: Optional[str] = None
-    ):
+    def __init__(self, gemini_api_key: Optional[str] = None, tavily_api_key: Optional[str] = None):
         self.llm = GeminiClient(api_key=gemini_api_key)
         self.search = TavilySearchTool(api_key=tavily_api_key)
         self.memory = memory
     
-    async def classify_intent(
-        self,
-        session_id: str,
-        user_message: str
-    ) -> dict:
-        """Classify user's intent from their message."""
+    async def classify_intent(self, session_id: str, user_message: str) -> dict:
+        """Classify user intent from their message."""
         session = self.memory.get_or_create_session(session_id)
         
         prompt = INTENT_CLASSIFIER_PROMPT.format(
@@ -56,151 +45,73 @@ class ResearchAgent:
             result = await self.llm.generate_json(prompt, temperature=0.1)
             return result
         except Exception as e:
-            # Default to clarification if classification fails
             return {
-                "intent": "CLARIFICATION_NEEDED",
+                "intent": "GENERAL_CHAT",
                 "company_name": None,
                 "confidence": 0.5,
                 "error": str(e)
             }
     
-    async def generate_research_queries(
-        self,
-        company_name: str,
-        focus_area: Optional[str] = None
-    ) -> list[dict]:
+    async def generate_research_queries(self, company_name: str, focus_area: Optional[str] = None) -> list[dict]:
         """Generate search queries for company research."""
         prompt = RESEARCH_ORCHESTRATOR_PROMPT.format(
             company_name=company_name,
             focus_area=focus_area or "general comprehensive research"
         )
-        
         result = await self.llm.generate_json(prompt, temperature=0.3)
         return result.get("queries", [])
     
-    async def detect_conflicts(
-        self,
-        company_name: str,
-        search_results: str
-    ) -> dict:
+    async def detect_conflicts(self, company_name: str, search_results: str) -> dict:
         """Analyze research results for conflicts."""
-        # Handle empty results
         if not search_results or len(search_results.strip()) < 50:
-            return {
-                "conflicts_found": False,
-                "conflicts": [],
-                "recommendation": "Limited data collected, no conflicts detected"
-            }
+            return {"conflicts_found": False, "conflicts": [], "recommendation": "Limited data collected"}
         
-        prompt = CONFLICT_DETECTOR_PROMPT.format(
-            company_name=company_name,
-            search_results=search_results
-        )
+        prompt = CONFLICT_DETECTOR_PROMPT.format(company_name=company_name, search_results=search_results)
         
         try:
             return await self.llm.generate_json(prompt, temperature=0.2)
         except Exception as e:
-            # Return safe default if conflict detection fails
-            return {
-                "conflicts_found": False,
-                "conflicts": [],
-                "recommendation": f"Could not analyze conflicts: {str(e)}"
-            }
+            return {"conflicts_found": False, "conflicts": [], "recommendation": f"Could not analyze: {str(e)}"}
     
-    async def research_company(
-        self,
-        session_id: str,
-        company_name: str,
-        focus_area: Optional[str] = None
-    ) -> AsyncGenerator[dict, None]:
-        """
-        Execute full research workflow with streaming progress.
-        
-        Yields:
-            Progress updates, conflicts, and final results
-        """
+    async def research_company(self, session_id: str, company_name: str, focus_area: Optional[str] = None) -> AsyncGenerator[dict, None]:
+        """Execute full research workflow with streaming progress."""
         self.memory.set_current_company(session_id, company_name)
         self.memory.set_research_status(session_id, ResearchStatus.RESEARCHING)
         
-        # Step 1: Generate search queries
-        yield {
-            "type": "status",
-            "message": f"Planning research strategy for {company_name}...",
-            "progress": 5
-        }
+        yield {"type": "status", "message": f"Planning research strategy for {company_name}...", "progress": 5}
         
         queries = await self.generate_research_queries(company_name, focus_area)
+        yield {"type": "status", "message": f"Generated {len(queries)} research queries. Starting research...", "progress": 10}
         
-        yield {
-            "type": "status", 
-            "message": f"Generated {len(queries)} research queries. Starting research...",
-            "progress": 10
-        }
-        
-        # Step 2: Execute searches with progress
         all_results = {}
         async for update in self.search.research_company(company_name, queries):
             if update["type"] == "progress":
                 base_progress = 10
-                search_progress = int((update["percent"] / 100) * 60)  # 60% for searches
-                yield {
-                    "type": "status",
-                    "message": update["message"],
-                    "progress": base_progress + search_progress
-                }
-            
+                search_progress = int((update["percent"] / 100) * 60)
+                yield {"type": "status", "message": update["message"], "progress": base_progress + search_progress}
             elif update["type"] == "result":
                 answer = update["data"].get("answer") or ""
-                yield {
-                    "type": "research_update",
-                    "section": update["section"],
-                    "preview": answer[:200] if answer else "Data collected"
-                }
-            
+                yield {"type": "research_update", "section": update["section"], "preview": answer[:200] if answer else "Data collected"}
             elif update["type"] == "complete":
                 all_results = update["results_by_section"]
         
-        # Step 3: Check for conflicts
-        yield {
-            "type": "status",
-            "message": "Analyzing research for conflicts...",
-            "progress": 75
-        }
+        yield {"type": "status", "message": "Analyzing research for conflicts...", "progress": 75}
         
         formatted_results = format_results_for_llm(all_results)
         conflicts = await self.detect_conflicts(company_name, formatted_results)
         
         if conflicts.get("conflicts_found"):
             self.memory.set_research_status(session_id, ResearchStatus.CONFLICT_FOUND)
-            yield {
-                "type": "conflicts",
-                "conflicts": conflicts["conflicts"],
-                "recommendation": conflicts["recommendation"]
-            }
+            yield {"type": "conflicts", "conflicts": conflicts["conflicts"], "recommendation": conflicts["recommendation"]}
         
-        # Step 4: Store results for plan generation
         self.memory.set_user_context(session_id, "research_data", formatted_results)
         self.memory.set_user_context(session_id, "focus_area", focus_area)
         
-        yield {
-            "type": "status",
-            "message": "Research complete! Ready to generate account plan.",
-            "progress": 80
-        }
-        
+        yield {"type": "status", "message": "Research complete. Generating account plan...", "progress": 80}
         self.memory.set_research_status(session_id, ResearchStatus.COMPLETED)
-        
-        yield {
-            "type": "complete",
-            "company": company_name,
-            "sections_researched": list(all_results.keys()),
-            "conflicts_found": conflicts.get("conflicts_found", False)
-        }
+        yield {"type": "complete", "company": company_name, "sections_researched": list(all_results.keys()), "conflicts_found": conflicts.get("conflicts_found", False)}
     
-    async def generate_plan(
-        self,
-        session_id: str
-    ) -> AsyncGenerator[dict, None]:
+    async def generate_plan(self, session_id: str) -> AsyncGenerator[dict, None]:
         """Generate the account plan from research data."""
         session = self.memory.get_session(session_id)
         if not session or not session.current_company:
@@ -210,11 +121,7 @@ class ResearchAgent:
         research_data = self.memory.get_user_context(session_id, "research_data")
         focus_area = self.memory.get_user_context(session_id, "focus_area")
         
-        yield {
-            "type": "status",
-            "message": "Generating comprehensive account plan...",
-            "progress": 85
-        }
+        yield {"type": "status", "message": "Generating comprehensive account plan...", "progress": 85}
         
         prompt = PLAN_GENERATOR_PROMPT.format(
             company_name=session.current_company,
@@ -223,74 +130,49 @@ class ResearchAgent:
         )
         
         try:
-            plan_data = await self.llm.generate_json(prompt, temperature=0.4)
+            plan_data = await self.llm.generate_json(prompt, temperature=0.4, retries=4)
             
-            # Construct AccountPlan object
+            # Build plan with safe defaults
+            def safe_get(d, key, default):
+                return d.get(key, default) if d else default
+            
+            overview_data = safe_get(plan_data, "overview", {})
+            overview_data["name"] = overview_data.get("name", session.current_company)
+            
             plan = AccountPlan(
                 company_name=session.current_company,
                 research_focus=focus_area,
-                overview=CompanyOverview(**plan_data.get("overview", {"name": session.current_company})),
-                business_model=BusinessModel(**plan_data.get("business_model", {})),
-                recent_news=RecentNews(**plan_data.get("recent_news", {})),
-                leadership=Leadership(**plan_data.get("leadership", {})),
-                market_position=MarketPosition(**plan_data.get("market_position", {})),
-                financial_health=FinancialHealth(**plan_data.get("financial_health", {})),
-                pain_points=PainPoints(**plan_data.get("pain_points", {})),
-                engagement_strategy=EngagementStrategy(**plan_data.get("engagement_strategy", {}))
+                overview=CompanyOverview(**overview_data),
+                business_model=BusinessModel(**safe_get(plan_data, "business_model", {})),
+                recent_news=RecentNews(**safe_get(plan_data, "recent_news", {})),
+                leadership=Leadership(**safe_get(plan_data, "leadership", {})),
+                market_position=MarketPosition(**safe_get(plan_data, "market_position", {})),
+                financial_health=FinancialHealth(**safe_get(plan_data, "financial_health", {})),
+                pain_points=PainPoints(**safe_get(plan_data, "pain_points", {})),
+                engagement_strategy=EngagementStrategy(**safe_get(plan_data, "engagement_strategy", {}))
             )
             
             self.memory.set_plan(session_id, plan)
-            
-            yield {
-                "type": "status",
-                "message": "Account plan generated successfully!",
-                "progress": 100
-            }
-            
-            yield {
-                "type": "plan_complete",
-                "plan": plan.model_dump()
-            }
+            yield {"type": "status", "message": "Account plan generated successfully.", "progress": 100}
+            yield {"type": "plan_complete", "plan": plan.model_dump()}
             
         except Exception as e:
-            yield {
-                "type": "error",
-                "message": f"Failed to generate plan: {str(e)}"
-            }
+            yield {"type": "error", "message": f"Failed to generate plan: {str(e)}"}
     
-    async def edit_section(
-        self,
-        session_id: str,
-        section_name: str,
-        edit_instructions: str
-    ) -> dict:
+    async def edit_section(self, session_id: str, section_name: str, edit_instructions: str) -> dict:
         """Edit a specific section of the account plan."""
         session = self.memory.get_session(session_id)
         if not session or not session.current_plan:
             return {"error": "No plan exists to edit"}
         
         plan = session.current_plan
-        
-        # Map section names to plan attributes
         section_map = {
-            "overview": "overview",
-            "business_model": "business_model",
-            "business model": "business_model",
-            "recent_news": "recent_news",
-            "news": "recent_news",
-            "leadership": "leadership",
-            "market_position": "market_position",
-            "market position": "market_position",
-            "competitors": "market_position",
-            "financial_health": "financial_health",
-            "financial": "financial_health",
-            "financials": "financial_health",
-            "pain_points": "pain_points",
-            "pain points": "pain_points",
-            "challenges": "pain_points",
-            "engagement_strategy": "engagement_strategy",
-            "engagement": "engagement_strategy",
-            "strategy": "engagement_strategy"
+            "overview": "overview", "business_model": "business_model", "business model": "business_model",
+            "recent_news": "recent_news", "news": "recent_news", "leadership": "leadership",
+            "market_position": "market_position", "market position": "market_position", "competitors": "market_position",
+            "financial_health": "financial_health", "financial": "financial_health", "financials": "financial_health",
+            "pain_points": "pain_points", "pain points": "pain_points", "challenges": "pain_points",
+            "engagement_strategy": "engagement_strategy", "engagement": "engagement_strategy", "strategy": "engagement_strategy"
         }
         
         attr_name = section_map.get(section_name.lower())
@@ -299,7 +181,6 @@ class ResearchAgent:
         
         current_content = getattr(plan, attr_name).model_dump()
         
-        # Optionally fetch additional research
         additional_research = ""
         if "more detail" in edit_instructions.lower() or "expand" in edit_instructions.lower():
             query = f"{plan.company_name} {section_name} detailed information"
@@ -307,75 +188,46 @@ class ResearchAgent:
             additional_research = search_result.answer or ""
         
         prompt = SECTION_EDITOR_PROMPT.format(
-            company_name=plan.company_name,
-            section_name=section_name,
+            company_name=plan.company_name, section_name=section_name,
             current_content=json.dumps(current_content, indent=2),
-            edit_request=edit_instructions,
-            additional_research=additional_research
+            edit_request=edit_instructions, additional_research=additional_research
         )
         
         updated_data = await self.llm.generate_json(prompt, temperature=0.3)
-        
-        # Update the plan section
         section_class = type(getattr(plan, attr_name))
         setattr(plan, attr_name, section_class(**updated_data))
         self.memory.set_plan(session_id, plan)
         
-        return {
-            "success": True,
-            "section": section_name,
-            "updated_content": updated_data
-        }
+        return {"success": True, "section": section_name, "updated_content": updated_data}
     
-    async def chat(
-        self,
-        session_id: str,
-        user_message: str
-    ) -> AsyncGenerator[dict, None]:
-        """
-        Main conversation handler - routes to appropriate actions.
-        
-        Yields:
-            Streaming response chunks and action results
-        """
+    async def chat(self, session_id: str, user_message: str) -> AsyncGenerator[dict, None]:
+        """Main conversation handler - routes to appropriate actions."""
         session = self.memory.get_or_create_session(session_id)
         self.memory.add_message(session_id, "user", user_message)
         
-        # Step 1: Classify intent
         intent_result = await self.classify_intent(session_id, user_message)
-        intent = intent_result.get("intent", "CLARIFICATION_NEEDED")
+        intent = intent_result.get("intent", "GENERAL_CHAT")
         company_name = intent_result.get("company_name")
         
         yield {"type": "intent", "intent": intent, "confidence": intent_result.get("confidence", 0)}
         
-        # Step 2: Route based on intent
         if intent == "START_RESEARCH" and company_name:
-            # Extract focus area if mentioned
             focus_area = self.memory.get_user_context(session_id, "focus_area")
-            
-            yield {"type": "message", "content": f"Starting research on **{company_name}**...\n\n"}
+            yield {"type": "message", "content": f"Starting research on {company_name}...\n\n"}
             
             async for update in self.research_company(session_id, company_name, focus_area):
                 yield update
             
-            # Auto-generate plan after research
             async for update in self.generate_plan(session_id):
                 yield update
         
         elif intent == "EDIT_SECTION":
             section = intent_result.get("section_to_edit")
             instructions = intent_result.get("edit_instructions") or user_message
-            
             yield {"type": "message", "content": f"Updating the {section} section...\n"}
-            
             result = await self.edit_section(session_id, section, instructions)
-            
             if result.get("success"):
-                yield {
-                    "type": "section_updated",
-                    "section": section,
-                    "content": result["updated_content"]
-                }
+                yield {"type": "section_updated", "section": section, "content": result["updated_content"]}
             else:
                 yield {"type": "error", "message": result.get("error")}
         
@@ -384,10 +236,7 @@ class ResearchAgent:
                 async for update in self.generate_plan(session_id):
                     yield update
             else:
-                yield {
-                    "type": "message",
-                    "content": "I don't have any research data yet. Which company would you like me to research?"
-                }
+                yield {"type": "message", "content": "I don't have any research data yet. Which company would you like me to research?"}
         
         elif intent == "OFF_TOPIC":
             response = await self._generate_conversation_response(
@@ -397,30 +246,22 @@ class ResearchAgent:
             yield {"type": "message", "content": response}
         
         elif intent == "CLARIFICATION_NEEDED":
-            response = await self._generate_conversation_response(
-                session_id, user_message,
-                extra_context=CONFUSED_USER_HANDLER
-            )
+            response = await self._generate_conversation_response(session_id, user_message, extra_context=CONFUSED_USER_HANDLER)
             yield {"type": "message", "content": response}
         
-        else:
-            # General conversation / questions
+        elif intent == "GENERAL_CHAT" or intent == "ASK_QUESTION":
+            # Handle general chat without triggering research
             response = await self._generate_conversation_response(session_id, user_message)
             yield {"type": "message", "content": response}
         
-        # Store assistant response
-        # (In practice, collect all message chunks and store the complete response)
+        else:
+            response = await self._generate_conversation_response(session_id, user_message)
+            yield {"type": "message", "content": response}
     
-    async def _generate_conversation_response(
-        self,
-        session_id: str,
-        user_message: str,
-        extra_context: str = ""
-    ) -> str:
+    async def _generate_conversation_response(self, session_id: str, user_message: str, extra_context: str = "") -> str:
         """Generate a conversational response."""
         session = self.memory.get_session(session_id)
         history = self.memory.get_history_string(session_id, limit=6)
-        
         plan_status = "Generated" if session.current_plan else "Not yet generated"
         
         system_prompt = CONVERSATION_PROMPT.format(
@@ -434,16 +275,10 @@ class ResearchAgent:
         if extra_context:
             system_prompt += f"\n\nAdditional context:\n{extra_context}"
         
-        response = await self.llm.generate(
-            prompt=user_message,
-            system_prompt=system_prompt,
-            temperature=0.7
-        )
-        
+        response = await self.llm.generate(prompt=user_message, system_prompt=system_prompt, temperature=0.7)
         return response.text
 
 
-# Convenience function for simple usage
 async def create_agent() -> ResearchAgent:
     """Create and return a configured agent instance."""
     return ResearchAgent()
