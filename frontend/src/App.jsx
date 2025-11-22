@@ -4,7 +4,7 @@ import './App.css'
 const API_URL = 'http://localhost:8000'
 const WS_URL = 'ws://localhost:8000'
 
-// --- Linkify Component (Same as before) ---
+// --- Linkify Component ---
 const Linkify = ({ text }) => {
   if (typeof text !== 'string') return text;
   const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -33,11 +33,13 @@ function App() {
   const [editingSection, setEditingSection] = useState(null)
   const [editInput, setEditInput] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [isListening, setIsListening] = useState(false)
   
   const wsRef = useRef(null)
   const messagesEndRef = useRef(null)
   const currentResponseRef = useRef('')
-  const inputRef = useRef(null) // --- NEW: Ref for auto-focus ---
+  const inputRef = useRef(null)
+  const recognitionRef = useRef(null) // --- NEW: Ref to control microphone ---
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -47,22 +49,83 @@ function App() {
     scrollToBottom()
   }, [messages])
 
-  // --- NEW: Auto-focus input when session changes or loading finishes ---
+  // Auto-focus input
   useEffect(() => {
     if (!isLoading && inputRef.current) {
-        // Small timeout to ensure DOM is ready and accessible
         setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [sessionId, isLoading]);
 
-  // 1. Fetch Session List on Mount
+  // --- 1. Voice to Text (STT) with Toggle ---
+  const toggleListening = () => {
+    // If already listening, stop it
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
+
+    // Check browser support
+    if (!('webkitSpeechRecognition' in window)) {
+      alert("Browser not supported for voice input. Please try Google Chrome.");
+      return;
+    }
+
+    const recognition = new window.webkitSpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => setIsListening(true);
+    
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Speech recognition error", event.error);
+      setIsListening(false);
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setInput(prev => prev + (prev ? ' ' : '') + transcript);
+    };
+
+    recognitionRef.current = recognition; // Store instance
+    recognition.start();
+  };
+
+  // --- 2. Text to Speech (TTS) ---
+  const speakText = (text) => {
+    if (!('speechSynthesis' in window)) {
+        alert("Text-to-speech not supported in this browser.");
+        return;
+    }
+    
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.1; 
+    utterance.pitch = 1;
+    
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(voice => voice.name.includes("Google US English")) || voices[0];
+    if (preferredVoice) utterance.voice = preferredVoice;
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Fetch Session List
   const fetchSessions = async () => {
     try {
       const res = await fetch(`${API_URL}/sessions`)
       if (res.ok) {
         const data = await res.json()
         setSessions(data)
-        // If no session selected and we have sessions, select the most recent one
         if (!sessionId && data.length > 0) {
           setSessionId(data[0].session_id)
         } else if (!sessionId) {
@@ -78,25 +141,22 @@ function App() {
     fetchSessions()
   }, [])
 
-  // 2. Handle Session Switching (Load History)
+  // Handle Session Switching
   useEffect(() => {
     if (!sessionId) return
 
     const loadSessionData = async () => {
-      setIsLoading(false) // Reset loading state on switch
-      setPlan(null) // Clear current plan
+      setIsLoading(false)
+      setPlan(null)
       setShowPlan(false)
       
       try {
-        // Fetch Message History
         const msgRes = await fetch(`${API_URL}/session/${sessionId}/messages`)
         if (msgRes.ok) {
           const history = await msgRes.json()
-          // Map backend history to frontend format if needed
           setMessages(history)
         }
 
-        // Fetch Plan (if exists)
         const planRes = await fetch(`${API_URL}/plan/${sessionId}`)
         if (planRes.ok) {
           const planData = await planRes.json()
@@ -109,7 +169,6 @@ function App() {
 
     loadSessionData()
 
-    // Connect WebSocket
     const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`)
     ws.onopen = () => console.log('Connected to session', sessionId)
     ws.onmessage = (event) => {
@@ -130,7 +189,7 @@ function App() {
       if (res.ok) {
         const data = await res.json()
         setSessionId(data.session_id)
-        await fetchSessions() // Refresh list
+        await fetchSessions()
       }
     } catch (e) {
       console.error("Failed to create session", e)
@@ -145,7 +204,6 @@ function App() {
         const res = await fetch(`${API_URL}/session/${idToDelete}`, { method: 'DELETE' });
         if (res.ok) {
             setSessions(prev => prev.filter(s => s.session_id !== idToDelete));
-            // If we deleted the current session, switch to another or create new
             if (sessionId === idToDelete) {
                 const remaining = sessions.filter(s => s.session_id !== idToDelete);
                 if (remaining.length > 0) {
@@ -176,7 +234,6 @@ function App() {
           }
           return newMsgs
         })
-        // Refresh session list names if a company was identified
         if (data.content.includes("Starting research on")) {
              fetchSessions() 
         }
@@ -191,7 +248,7 @@ function App() {
         setPlan(data.plan)
         setShowPlan(true)
         setMessages(prev => [...prev, { role: 'system', content: 'Plan generated.' }])
-        fetchSessions() // Update list to show company name
+        fetchSessions()
         break
       case 'section_updated':
         setPlan(prev => ({...prev, [data.section]: data.content}))
@@ -218,7 +275,6 @@ function App() {
     setInput('')
   }
 
-  // ... (handleKeyPress, handleEditSection, submitEdit remain same)
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -241,7 +297,6 @@ function App() {
     setEditInput('')
   }
 
-  // Helper to format date
   const formatDate = (dateStr) => {
     try {
       return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -271,7 +326,7 @@ function App() {
       </header>
 
       <div className="main-content">
-        {/* Sidebar for Sessions */}
+        {/* Sidebar */}
         <div className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
           <div className="sidebar-header">
             <h3>History</h3>
@@ -304,10 +359,9 @@ function App() {
           </div>
         </div>
 
-        {/* Main Chat Panel */}
+        {/* Chat Panel */}
         <div className={`chat-panel ${showPlan ? 'with-plan' : ''}`}>
           <div className="messages">
-             {/* Welcome message only if truly empty session */}
              {messages.length === 0 && !isLoading && (
               <div className="welcome">
                 <h2>Company Research Assistant</h2>
@@ -325,9 +379,22 @@ function App() {
                   {msg.role === 'user' ? 'U' : msg.role === 'assistant' ? 'AI' : 'i'}
                 </div>
                 <div className="content">
-                  <Linkify text={msg.content} />
-                  
-                  {/* --- MODIFIED: Render Conflicts from WebSocket (msg.conflicts) OR History (msg.metadata.conflicts) --- */}
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+                    <div><Linkify text={msg.content} /></div>
+                    
+                    {/* --- READ ALOUD BUTTON --- */}
+                    {msg.role === 'assistant' && (
+                      <button 
+                        className="btn-icon speak-btn" 
+                        onClick={() => speakText(msg.content)}
+                        title="Read aloud"
+                        style={{marginLeft: '12px', opacity: 0.6, cursor: 'pointer', border: 'none', background: 'transparent', fontSize: '1rem'}}
+                      >
+                        🔊
+                      </button>
+                    )}
+                  </div>
+
                   {(msg.conflicts || (msg.metadata && msg.metadata.conflicts)) && (
                     <ul style={{ marginTop: '0.5rem', paddingLeft: '1rem' }}>
                       {(msg.conflicts || msg.metadata.conflicts).map((c, j) => (
@@ -337,8 +404,6 @@ function App() {
                       ))}
                     </ul>
                   )}
-                  {/* ---------------------------------------------------------------------------------------------------- */}
-
                 </div>
               </div>
             ))}
@@ -365,7 +430,7 @@ function App() {
           
           <div className="input-area">
             <textarea
-              ref={inputRef} /* --- NEW: Attach ref here --- */
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
@@ -373,11 +438,36 @@ function App() {
               disabled={isLoading}
               rows={1}
             />
+            
+            {/* --- MICROPHONE BUTTON (TOGGLES LISTENING) --- */}
+            <button 
+              onClick={toggleListening} 
+              disabled={isLoading} 
+              className={`btn-icon mic-btn ${isListening ? 'listening' : ''}`}
+              title={isListening ? "Stop Listening" : "Voice Input"}
+              style={{
+                  marginRight: '8px', 
+                  background: isListening ? 'rgba(239, 68, 68, 0.2)' : 'transparent',
+                  color: isListening ? '#ef4444' : 'var(--text-muted)',
+                  border: `1px solid ${isListening ? '#ef4444' : 'var(--border)'}`,
+                  borderRadius: '8px',
+                  padding: '0 12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: isListening ? 'bold' : 'normal'
+              }}
+            >
+              {isListening ? '⏹' : '🎤'}
+            </button>
+
             <button onClick={sendMessage} disabled={isLoading || !input.trim()} className="send-btn">Send</button>
           </div>
         </div>
 
-        {/* Plan Panel (Same as before) */}
+        {/* Plan Panel */}
         {showPlan && plan && (
           <div className="plan-panel">
             <div className="plan-header">
@@ -441,7 +531,7 @@ function App() {
   )
 }
 
-// ... (PlanSection component remains the same as previous valid version)
+// PlanSection Component
 function PlanSection({ title, sectionKey, data, onEdit, isEditing, editInput, setEditInput, onSubmitEdit, onCancelEdit }) {
   const renderTextWithLink = (text) => {
     if (typeof text === 'string' && (text.startsWith('http') || text.startsWith('www'))) {
