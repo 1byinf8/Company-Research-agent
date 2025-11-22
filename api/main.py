@@ -173,6 +173,16 @@ async def chat(request: ChatRequest):
         plan=plan
     )
 
+@app.delete("/session/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a saved session and its data."""
+    session = memory.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    memory.clear_session(session_id)
+    return {"message": "Session successfully deleted", "session_id": session_id}
+
 
 # ============== WebSocket for Streaming ==============
 
