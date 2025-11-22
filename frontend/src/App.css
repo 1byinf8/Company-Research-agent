@@ -450,51 +450,6 @@ body {
   30% { opacity: 1; transform: translateY(-2px); }
 }
 
-/* Input Area */
-.input-area {
-  display: flex;
-  gap: 0.75rem;
-  padding: 1rem 1.5rem;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border);
-}
-
-.input-area textarea {
-  flex: 1;
-  padding: 0.75rem 1rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 0.9375rem;
-  font-family: inherit;
-  resize: none;
-  min-height: 44px;
-  max-height: 120px;
-  line-height: 1.5;
-}
-
-.input-area textarea::placeholder {
-  color: var(--text-muted);
-}
-
-.input-area textarea:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-
-.send-btn {
-  padding: 0 1.25rem;
-  background: var(--primary);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-weight: 500;
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
 .send-btn:hover:not(:disabled) {
   background: var(--primary-dark);
 }
@@ -714,4 +669,159 @@ body {
   .message {
     max-width: 90%;
   }
+}
+
+.mic-btn {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  margin-right: 10px;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: visible;
+}
+
+.mic-btn:hover:not(:disabled):not(.listening) {
+  background: var(--bg-hover);
+  border-color: var(--border-light);
+  color: var(--text);
+  transform: scale(1.02);
+}
+
+/* Listening State */
+.mic-btn.listening {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
+  transform: scale(1.05);
+}
+
+.mic-btn.listening:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+/* Icon Wrapper for smooth transitions */
+.mic-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
+}
+
+.mic-btn:active .mic-icon-wrapper {
+  transform: scale(0.9);
+}
+
+/* Recording Indicator - Pulsing ring */
+.recording-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  pointer-events: none;
+  animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+/* Green dot indicator when recording */
+.mic-btn.listening::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  background: #22c55e;
+  border-radius: 50%;
+  border: 2px solid var(--bg-secondary);
+  animation: blink 1s ease-in-out infinite;
+  z-index: 10;
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.9);
+  }
+}
+
+/* Disabled state */
+.mic-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.mic-btn:disabled .recording-indicator {
+  animation: none;
+}
+
+/* ============================================
+   Fix Input Area padding/alignment
+   ============================================ */
+
+.input-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 1rem 1.5rem;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+
+.input-area textarea {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.9375rem;
+  font-family: inherit;
+  resize: none;
+  min-height: 44px;
+  max-height: 120px;
+  line-height: 1.5;
+}
+
+.send-btn {
+  height: 44px;
+  padding: 0 1.25rem;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
 }

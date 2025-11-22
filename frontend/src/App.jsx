@@ -1,6 +1,50 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import './App.css'
 
+const MicIcon = () => (
+  <svg 
+    width="20" 
+    height="20" 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+  >
+    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+    <line x1="12" x2="12" y1="19" y2="22"/>
+  </svg>
+);
+
+const StopIcon = () => (
+  <svg 
+    width="16" 
+    height="16" 
+    viewBox="0 0 24 24" 
+    fill="currentColor"
+  >
+    <rect x="4" y="4" width="16" height="16" rx="2"/>
+  </svg>
+);
+
+const SendIcon = () => (
+  <svg 
+    width="18" 
+    height="18" 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+  >
+    <line x1="22" y1="2" x2="11" y2="13"/>
+    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+  </svg>
+);
+
 const API_URL = 'http://localhost:8000'
 const WS_URL = 'ws://localhost:8000'
 
@@ -39,7 +83,7 @@ function App() {
   const messagesEndRef = useRef(null)
   const currentResponseRef = useRef('')
   const inputRef = useRef(null)
-  const recognitionRef = useRef(null) // --- NEW: Ref to control microphone ---
+  const recognitionRef = useRef(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -49,6 +93,16 @@ function App() {
     scrollToBottom()
   }, [messages])
 
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+        recognitionRef.current = null;
+      }
+    };
+  }, []);
+
+
   // Auto-focus input
   useEffect(() => {
     if (!isLoading && inputRef.current) {
@@ -57,63 +111,129 @@ function App() {
   }, [sessionId, isLoading]);
 
   // --- 1. Voice to Text (STT) with Toggle ---
-  const toggleListening = () => {
-    // If already listening, stop it
-    if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      setIsListening(false);
-      return;
+  // Replace your toggleListening function with this fixed version:
+
+const toggleListening = () => {
+  // Check browser support
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  
+  if (!SpeechRecognition) {
+    alert("Speech recognition not supported. Please use Chrome, Edge, or Safari.");
+    return;
+  }
+
+  // If already listening, stop it
+  if (isListening) {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop(); // Use stop() to allow final results to process
     }
+    return; // Don't set state here - let onend handle it
+  }
 
-    // Check browser support
-    if (!('webkitSpeechRecognition' in window)) {
-      alert("Browser not supported for voice input. Please try Google Chrome.");
-      return;
-    }
+  // Create new recognition instance
+  const recognition = new SpeechRecognition();
+  
+  // Configuration
+  recognition.continuous = true; // Keep listening until manually stopped
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+  recognition.maxAlternatives = 1;
 
-    const recognition = new window.webkitSpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
+  // Track processed results to avoid duplicates
+  let finalTranscriptBuffer = '';
 
-    recognition.onstart = () => setIsListening(true);
-    
-    recognition.onend = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-    };
+  // Store reference
+  recognitionRef.current = recognition;
 
-    recognition.onerror = (event) => {
-      console.error("Speech recognition error", event.error);
-      setIsListening(false);
-    };
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setInput(prev => prev + (prev ? ' ' : '') + transcript);
-    };
-
-    recognitionRef.current = recognition; // Store instance
-    recognition.start();
+  recognition.onstart = () => {
+    console.log('🎤 Listening started');
+    setIsListening(true);
+    finalTranscriptBuffer = '';
   };
+
+  recognition.onresult = (event) => {
+    let interimTranscript = '';
+    let newFinalTranscript = '';
+
+    // Process all results
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      
+      if (event.results[i].isFinal) {
+        newFinalTranscript += transcript;
+      } else {
+        interimTranscript += transcript;
+      }
+    }
+
+    // Only update input with NEW final transcripts (avoid duplicates)
+    if (newFinalTranscript && newFinalTranscript !== finalTranscriptBuffer) {
+      console.log('📝 Final transcript:', newFinalTranscript);
+      finalTranscriptBuffer = newFinalTranscript;
+      
+      setInput(prev => {
+        const trimmedPrev = prev.trim();
+        const separator = trimmedPrev ? ' ' : '';
+        return trimmedPrev + separator + newFinalTranscript.trim();
+      });
+    }
+
+    // Optional: Show interim results in console for debugging
+    if (interimTranscript) {
+      console.log('💭 Interim:', interimTranscript);
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.error('Speech error:', event.error);
+    
+    if (event.error === 'not-allowed') {
+      alert('Microphone access denied. Please allow microphone permission.');
+    } else if (event.error === 'audio-capture') {
+      alert('No microphone found. Please connect a microphone.');
+    } else if (event.error === 'no-speech') {
+      // Don't alert - just log
+      console.log('No speech detected');
+    } else if (event.error === 'aborted') {
+      // User stopped - this is fine
+      console.log('Recognition aborted by user');
+    }
+    
+    setIsListening(false);
+    recognitionRef.current = null;
+  };
+
+  recognition.onend = () => {
+    console.log('🎤 Listening ended');
+    setIsListening(false);
+    recognitionRef.current = null;
+  };
+
+  // Start listening
+  try {
+    recognition.start();
+    console.log('🎤 Recognition started');
+  } catch (err) {
+    console.error('Failed to start recognition:', err);
+    setIsListening(false);
+    recognitionRef.current = null;
+  }
+};
 
   // --- 2. Text to Speech (TTS) ---
   const speakText = (text) => {
     if (!('speechSynthesis' in window)) {
-        alert("Text-to-speech not supported in this browser.");
-        return;
+      alert("Text-to-speech not supported.");
+      return;
     }
     
     window.speechSynthesis.cancel();
-
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.1; 
+    utterance.rate = 1.1;
     utterance.pitch = 1;
     
     const voices = window.speechSynthesis.getVoices();
-    const preferredVoice = voices.find(voice => voice.name.includes("Google US English")) || voices[0];
+    const preferredVoice = voices.find(v => v.name.includes("Google US English")) || voices[0];
     if (preferredVoice) utterance.voice = preferredVoice;
 
     window.speechSynthesis.speak(utterance);
@@ -434,36 +554,34 @@ function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask about a company..."
+              placeholder="Ask about a company... (e.g., 'Research Stripe')"
               disabled={isLoading}
               rows={1}
             />
             
-            {/* --- MICROPHONE BUTTON (TOGGLES LISTENING) --- */}
+            {/* Microphone Button */}
             <button 
               onClick={toggleListening} 
               disabled={isLoading} 
-              className={`btn-icon mic-btn ${isListening ? 'listening' : ''}`}
-              title={isListening ? "Stop Listening" : "Voice Input"}
-              style={{
-                  marginRight: '8px', 
-                  background: isListening ? 'rgba(239, 68, 68, 0.2)' : 'transparent',
-                  color: isListening ? '#ef4444' : 'var(--text-muted)',
-                  border: `1px solid ${isListening ? '#ef4444' : 'var(--border)'}`,
-                  borderRadius: '8px',
-                  padding: '0 12px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: isListening ? 'bold' : 'normal'
-              }}
+              className={`mic-btn ${isListening ? 'listening' : ''}`}
+              title={isListening ? "Click to stop" : "Click to speak"}
+              aria-label={isListening ? "Stop recording" : "Start voice input"}
             >
-              {isListening ? '⏹' : '🎤'}
+              <span className="mic-icon-wrapper">
+                {isListening ? <StopIcon /> : <MicIcon />}
+              </span>
+              {isListening && <span className="recording-indicator"></span>}
             </button>
 
-            <button onClick={sendMessage} disabled={isLoading || !input.trim()} className="send-btn">Send</button>
+            {/* Send Button */}
+            <button 
+              onClick={sendMessage} 
+              disabled={isLoading || !input.trim()} 
+              className="send-btn"
+              title="Send message"
+            >
+              <SendIcon />
+            </button>
           </div>
         </div>
 
