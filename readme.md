@@ -122,6 +122,16 @@ Agent: "I'm designed for company research. I can help research
   <img src="architecture-images/decisions.png" />
 </p>
 
+## Workflows
+
+<p align="center">
+  <img src="architecture-images/agent-workflow.png" />
+</p>
+
+<p align="center">
+  <img src="architecture-images/Research-workflow.png" />
+</p>
+
 ## Architecture Q&A
 
 ### 1. Why use Tavily instead of a separate web scraper for URL fetching?
