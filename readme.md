@@ -2,22 +2,23 @@
 
 An intelligent conversational agent that helps users research companies and generate comprehensive account plans for sales and business development.
 
-## 🎯 Features
+## Features
 
 - **Natural Conversation**: Handles confused, efficient, chatty, and edge-case users
 - **Multi-Source Research**: Aggregates data from multiple web sources via Tavily
 - **Progress Updates**: Real-time streaming updates during research
-- **Conflict Detection**: Identifies and reports conflicting information
+- **Conflict Detection**: Identifies and reports conflicting information and wait for Human to solve the conflicts
 - **Account Plan Generation**: Creates structured, actionable account plans
 - **Section Editing**: Allows users to modify specific sections with natural language
+- **Voice interface**: Allows users to talk with agent through voice mode and even has a manual text to speech for Agent response
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Frontend (React)                       │
-│  Chat Interface │ Account Plan Viewer │ Section Editor      │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                      Frontend (React)                                          |
+│  Chat Interface │ Account Plan Viewer │ Section Editor | Session Management    │
+└────────────────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -41,7 +42,7 @@ An intelligent conversational agent that helps users research companies and gene
 └─────────────────────────┘     └─────────────────────────────┘
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 company-research-assistant/
@@ -68,7 +69,7 @@ company-research-assistant/
 └── README.md
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Clone and Setup
 
@@ -82,6 +83,11 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Frontend Setup
+cd frontend
+npm install
+npm run dev
 ```
 
 ### 2. Configure Environment
@@ -107,7 +113,7 @@ python test_agent.py --interactive
 uvicorn api.main:app --reload
 ```
 
-## 🎭 User Persona Handling
+## User Persona Handling
 
 ### Confused User
 ```
@@ -138,7 +144,7 @@ Agent: "I'm designed for company research. I can help research
        pizza companies though - like Domino's. Would that help?"
 ```
 
-## 🔧 Design Decisions
+## Design Decisions
 
 ### Why Gemini 2.5 Flash?
 - Fast inference for responsive conversations
@@ -164,7 +170,7 @@ Agent: "I'm designed for company research. I can help research
 - Enables section-specific editing
 - Supports multi-turn clarifications
 
-## ❓ Architecture Q&A
+## Architecture Q&A
 
 ### 1. Why use Tavily instead of a separate web scraper for URL fetching?
 
@@ -360,7 +366,7 @@ To scale further:
 
 The current architecture supports these migrations without major refactoring.
 
-## 📊 Account Plan Structure
+## Account Plan Structure
 
 1. **Company Overview** - Basics, size, revenue
 2. **Business Model** - Products, revenue streams
@@ -371,7 +377,7 @@ The current architecture supports these migrations without major refactoring.
 7. **Pain Points** - Challenges and opportunities
 8. **Engagement Strategy** - How to approach
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -381,24 +387,12 @@ pytest tests/ -v
 python test_agent.py  # Runs predefined test scenarios
 ```
 
-## 📹 Demo Scenarios
-
-The demo video covers:
-1. Architecture walkthrough (1.5 min)
-2. Confused user guidance (2 min)
-3. Efficient user quick research (2 min)
-4. Conflict detection handling (1.5 min)
-5. Section editing (1.5 min)
-6. Edge cases (1 min)
-
 ## 🛣️ Roadmap
 
 - [x] AI Agent Core
-- [ ] FastAPI Backend
-- [ ] React Frontend
-- [ ] Voice Interface
-- [ ] Export to PDF/Doc
-- [ ] Company Comparison Mode
+- [x] FastAPI Backend
+- [x] React Frontend
+- [x] Voice Interface
 
 ## 📄 License
 
