@@ -12,35 +12,9 @@ An intelligent conversational agent that helps users research companies and gene
 - **Section Editing**: Allows users to modify specific sections with natural language
 - **Voice Interface**: Allows users to talk with agent through voice mode and even has a manual text to speech for Agent response
 
-## Architecture
-
-```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│                      Frontend (React)                                          |
-│  Chat Interface │ Account Plan Viewer │ Section Editor | Session Management    │
-└────────────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Backend (FastAPI)                         │
-│  WebSocket Handler │ Session Manager │ API Routes           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   AI Agent Layer                            │
-│  Intent Classifier │ Research Orchestrator │ Plan Generator │
-└─────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────────┐
-│      Gemini 2.5 Flash   │     │        Tavily Search        │
-│  - Intent Detection     │     │  - Company Research         │
-│  - Plan Generation      │     │  - News Aggregation         │
-│  - Conversation         │     │  - Conflict Sources         │
-└─────────────────────────┘     └─────────────────────────────┘
-```
+<p align="center">
+  <img src="architecture-images/architecture.png" />
+</p>
 
 ## Project Structure
 
@@ -144,31 +118,9 @@ Agent: "I'm designed for company research. I can help research
        pizza companies though - like Domino's. Would that help?"
 ```
 
-## Design Decisions
-
-### Why Gemini 2.5 Flash?
-- Fast inference for responsive conversations
-- Strong reasoning for intent classification
-- JSON mode for structured outputs
-- Cost-effective for multi-step workflows
-
-### Why Tavily?
-- Purpose-built for AI agents
-- Returns both raw results and AI summaries
-- Good coverage of business/company data
-- Simple API with reliable results
-
-### Streaming Architecture
-- Provides real-time progress updates
-- Keeps users engaged during research
-- Enables early conflict detection
-- Better UX than waiting for completion
-
-### Conversation Memory
-- Maintains context across interactions
-- Stores research state and plans
-- Enables section-specific editing
-- Supports multi-turn clarifications
+<p align="center">
+  <img src="architecture-images/decisions.png" />
+</p>
 
 ## Architecture Q&A
 
