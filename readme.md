@@ -10,7 +10,7 @@ An intelligent conversational agent that helps users research companies and gene
 - **Conflict Detection**: Identifies and reports conflicting information and wait for Human to solve the conflicts
 - **Account Plan Generation**: Creates structured, actionable account plans
 - **Section Editing**: Allows users to modify specific sections with natural language
-- **Voice interface**: Allows users to talk with agent through voice mode and even has a manual text to speech for Agent response
+- **Voice Interface**: Allows users to talk with agent through voice mode and even has a manual text to speech for Agent response
 
 ## Architecture
 
