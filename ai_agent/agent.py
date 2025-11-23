@@ -319,12 +319,21 @@ class ResearchAgent:
             edit_request=edit_instructions, additional_research=additional_research
         )
         
-        updated_data = await self.llm.generate_json(prompt, temperature=0.3)
-        section_class = type(getattr(plan, attr_name))
-        setattr(plan, attr_name, section_class(**updated_data))
-        self.memory.set_plan(session_id, plan)
-        
-        return {"success": True, "section": section_name, "updated_content": updated_data}
+        try:
+            updated_data = await self.llm.generate_json(prompt, temperature=0.3)
+            section_class = type(getattr(plan, attr_name))
+            setattr(plan, attr_name, section_class(**updated_data))
+            self.memory.set_plan(session_id, plan)
+            
+            # Return the updated section data AND the full plan
+            return {
+                "success": True, 
+                "section": attr_name, 
+                "updated_content": updated_data,
+                "full_plan": plan.model_dump(mode='json')  # Add this line
+            }
+        except Exception as e:
+            return {"error": f"Failed to update section: {str(e)}"}
     
     async def chat(self, session_id: str, user_message: str) -> AsyncGenerator[dict, None]:
         """Main conversation handler - routes to appropriate actions."""

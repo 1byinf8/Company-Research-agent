@@ -78,6 +78,7 @@ function App() {
   const [editInput, setEditInput] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isListening, setIsListening] = useState(false)
+  const [isEditLoading, setIsEditLoading] = useState(false) // NEW: Edit loading state
   
   const wsRef = useRef(null)
   const messagesEndRef = useRef(null)
@@ -102,125 +103,105 @@ function App() {
     };
   }, []);
 
-
-  // Auto-focus input
   useEffect(() => {
     if (!isLoading && inputRef.current) {
         setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [sessionId, isLoading]);
 
-  // --- 1. Voice to Text (STT) with Toggle ---
-  // Replace your toggleListening function with this fixed version:
-
-const toggleListening = () => {
-  // Check browser support
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  
-  if (!SpeechRecognition) {
-    alert("Speech recognition not supported. Please use Chrome, Edge, or Safari.");
-    return;
-  }
-
-  // If already listening, stop it
-  if (isListening) {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop(); // Use stop() to allow final results to process
+  const toggleListening = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      alert("Speech recognition not supported. Please use Chrome, Edge, or Safari.");
+      return;
     }
-    return; // Don't set state here - let onend handle it
-  }
 
-  // Create new recognition instance
-  const recognition = new SpeechRecognition();
-  
-  // Configuration
-  recognition.continuous = true; // Keep listening until manually stopped
-  recognition.interimResults = true;
-  recognition.lang = 'en-US';
-  recognition.maxAlternatives = 1;
-
-  // Track processed results to avoid duplicates
-  let finalTranscriptBuffer = '';
-
-  // Store reference
-  recognitionRef.current = recognition;
-
-  recognition.onstart = () => {
-    console.log('🎤 Listening started');
-    setIsListening(true);
-    finalTranscriptBuffer = '';
-  };
-
-  recognition.onresult = (event) => {
-    let interimTranscript = '';
-    let newFinalTranscript = '';
-
-    // Process all results
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = event.results[i][0].transcript;
-      
-      if (event.results[i].isFinal) {
-        newFinalTranscript += transcript;
-      } else {
-        interimTranscript += transcript;
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
       }
+      return;
     }
 
-    // Only update input with NEW final transcripts (avoid duplicates)
-    if (newFinalTranscript && newFinalTranscript !== finalTranscriptBuffer) {
-      console.log('📝 Final transcript:', newFinalTranscript);
-      finalTranscriptBuffer = newFinalTranscript;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.maxAlternatives = 1;
+
+    let finalTranscriptBuffer = '';
+    recognitionRef.current = recognition;
+
+    recognition.onstart = () => {
+      console.log('🎤 Listening started');
+      setIsListening(true);
+      finalTranscriptBuffer = '';
+    };
+
+    recognition.onresult = (event) => {
+      let interimTranscript = '';
+      let newFinalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        
+        if (event.results[i].isFinal) {
+          newFinalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      if (newFinalTranscript && newFinalTranscript !== finalTranscriptBuffer) {
+        console.log('📝 Final transcript:', newFinalTranscript);
+        finalTranscriptBuffer = newFinalTranscript;
+        
+        setInput(prev => {
+          const trimmedPrev = prev.trim();
+          const separator = trimmedPrev ? ' ' : '';
+          return trimmedPrev + separator + newFinalTranscript.trim();
+        });
+      }
+
+      if (interimTranscript) {
+        console.log('💭 Interim:', interimTranscript);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.error('Speech error:', event.error);
       
-      setInput(prev => {
-        const trimmedPrev = prev.trim();
-        const separator = trimmedPrev ? ' ' : '';
-        return trimmedPrev + separator + newFinalTranscript.trim();
-      });
-    }
+      if (event.error === 'not-allowed') {
+        alert('Microphone access denied. Please allow microphone permission.');
+      } else if (event.error === 'audio-capture') {
+        alert('No microphone found. Please connect a microphone.');
+      } else if (event.error === 'no-speech') {
+        console.log('No speech detected');
+      } else if (event.error === 'aborted') {
+        console.log('Recognition aborted by user');
+      }
+      
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
 
-    // Optional: Show interim results in console for debugging
-    if (interimTranscript) {
-      console.log('💭 Interim:', interimTranscript);
+    recognition.onend = () => {
+      console.log('🎤 Listening ended');
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    try {
+      recognition.start();
+      console.log('🎤 Recognition started');
+    } catch (err) {
+      console.error('Failed to start recognition:', err);
+      setIsListening(false);
+      recognitionRef.current = null;
     }
   };
 
-  recognition.onerror = (event) => {
-    console.error('Speech error:', event.error);
-    
-    if (event.error === 'not-allowed') {
-      alert('Microphone access denied. Please allow microphone permission.');
-    } else if (event.error === 'audio-capture') {
-      alert('No microphone found. Please connect a microphone.');
-    } else if (event.error === 'no-speech') {
-      // Don't alert - just log
-      console.log('No speech detected');
-    } else if (event.error === 'aborted') {
-      // User stopped - this is fine
-      console.log('Recognition aborted by user');
-    }
-    
-    setIsListening(false);
-    recognitionRef.current = null;
-  };
-
-  recognition.onend = () => {
-    console.log('🎤 Listening ended');
-    setIsListening(false);
-    recognitionRef.current = null;
-  };
-
-  // Start listening
-  try {
-    recognition.start();
-    console.log('🎤 Recognition started');
-  } catch (err) {
-    console.error('Failed to start recognition:', err);
-    setIsListening(false);
-    recognitionRef.current = null;
-  }
-};
-
-  // --- 2. Text to Speech (TTS) ---
   const speakText = (text) => {
     if (!('speechSynthesis' in window)) {
       alert("Text-to-speech not supported.");
@@ -239,7 +220,6 @@ const toggleListening = () => {
     window.speechSynthesis.speak(utterance);
   };
 
-  // Fetch Session List
   const fetchSessions = async () => {
     try {
       const res = await fetch(`${API_URL}/sessions`)
@@ -261,7 +241,6 @@ const toggleListening = () => {
     fetchSessions()
   }, [])
 
-  // Handle Session Switching
   useEffect(() => {
     if (!sessionId) return
 
@@ -371,17 +350,32 @@ const toggleListening = () => {
         fetchSessions()
         break
       case 'section_updated':
-        setPlan(prev => ({...prev, [data.section]: data.content}))
+        // Update with full plan data
+        if (data.full_plan) {
+          setPlan(data.full_plan)
+        } else {
+          setPlan(prev => ({...prev, [data.section]: data.updated_content}))
+        }
         setEditingSection(null)
+        setIsEditLoading(false)
+        
+        // ✅ Keep message - backend now persists it too
+        setMessages(prev => [...prev, { 
+          role: 'system', 
+          content: `Section "${data.section}" updated successfully.` 
+        }])
         break
       case 'done':
         setIsLoading(false)
         setProgress(null)
+        setIsEditLoading(false)
         currentResponseRef.current = ''
         break
       case 'error':
         setMessages(prev => [...prev, { role: 'error', content: data.message }])
         setIsLoading(false)
+        setIsEditLoading(false)
+        setEditingSection(null)
         break
     }
   }, [])
@@ -409,6 +403,7 @@ const toggleListening = () => {
 
   const submitEdit = () => {
     if (!editInput.trim() || !wsRef.current) return
+    setIsEditLoading(true) // NEW: Start loading
     wsRef.current.send(JSON.stringify({
       type: 'edit_section',
       section: editingSection,
@@ -446,7 +441,6 @@ const toggleListening = () => {
       </header>
 
       <div className="main-content">
-        {/* Sidebar */}
         <div className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
           <div className="sidebar-header">
             <h3>History</h3>
@@ -479,7 +473,6 @@ const toggleListening = () => {
           </div>
         </div>
 
-        {/* Chat Panel */}
         <div className={`chat-panel ${showPlan ? 'with-plan' : ''}`}>
           <div className="messages">
              {messages.length === 0 && !isLoading && (
@@ -502,7 +495,6 @@ const toggleListening = () => {
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
                     <div><Linkify text={msg.content} /></div>
                     
-                    {/* --- READ ALOUD BUTTON --- */}
                     {msg.role === 'assistant' && (
                       <button 
                         className="btn-icon speak-btn" 
@@ -559,7 +551,6 @@ const toggleListening = () => {
               rows={1}
             />
             
-            {/* Microphone Button */}
             <button 
               onClick={toggleListening} 
               disabled={isLoading} 
@@ -573,7 +564,6 @@ const toggleListening = () => {
               {isListening && <span className="recording-indicator"></span>}
             </button>
 
-            {/* Send Button */}
             <button 
               onClick={sendMessage} 
               disabled={isLoading || !input.trim()} 
@@ -585,7 +575,6 @@ const toggleListening = () => {
           </div>
         </div>
 
-        {/* Plan Panel */}
         {showPlan && plan && (
           <div className="plan-panel">
             <div className="plan-header">
@@ -598,48 +587,56 @@ const toggleListening = () => {
                 onEdit={handleEditSection} isEditing={editingSection === 'overview'}
                 editInput={editInput} setEditInput={setEditInput}
                 onSubmitEdit={submitEdit} onCancelEdit={() => setEditingSection(null)}
+                isLoading={isEditLoading && editingSection === 'overview'}
               />
               <PlanSection 
                 title="Business Model" sectionKey="business_model" data={plan.business_model}
                 onEdit={handleEditSection} isEditing={editingSection === 'business_model'}
                 editInput={editInput} setEditInput={setEditInput}
                 onSubmitEdit={submitEdit} onCancelEdit={() => setEditingSection(null)}
+                isLoading={isEditLoading && editingSection === 'business_model'}
               />
               <PlanSection 
                 title="Recent News" sectionKey="recent_news" data={plan.recent_news}
                 onEdit={handleEditSection} isEditing={editingSection === 'recent_news'}
                 editInput={editInput} setEditInput={setEditInput}
                 onSubmitEdit={submitEdit} onCancelEdit={() => setEditingSection(null)}
+                isLoading={isEditLoading && editingSection === 'recent_news'}
               />
               <PlanSection 
                 title="Leadership" sectionKey="leadership" data={plan.leadership}
                 onEdit={handleEditSection} isEditing={editingSection === 'leadership'}
                 editInput={editInput} setEditInput={setEditInput}
                 onSubmitEdit={submitEdit} onCancelEdit={() => setEditingSection(null)}
+                isLoading={isEditLoading && editingSection === 'leadership'}
               />
               <PlanSection 
                 title="Market Position" sectionKey="market_position" data={plan.market_position}
                 onEdit={handleEditSection} isEditing={editingSection === 'market_position'}
                 editInput={editInput} setEditInput={setEditInput}
                 onSubmitEdit={submitEdit} onCancelEdit={() => setEditingSection(null)}
+                isLoading={isEditLoading && editingSection === 'market_position'}
               />
               <PlanSection 
                 title="Financial Health" sectionKey="financial_health" data={plan.financial_health}
                 onEdit={handleEditSection} isEditing={editingSection === 'financial_health'}
                 editInput={editInput} setEditInput={setEditInput}
                 onSubmitEdit={submitEdit} onCancelEdit={() => setEditingSection(null)}
+                isLoading={isEditLoading && editingSection === 'financial_health'}
               />
               <PlanSection 
                 title="Pain Points" sectionKey="pain_points" data={plan.pain_points}
                 onEdit={handleEditSection} isEditing={editingSection === 'pain_points'}
                 editInput={editInput} setEditInput={setEditInput}
                 onSubmitEdit={submitEdit} onCancelEdit={() => setEditingSection(null)}
+                isLoading={isEditLoading && editingSection === 'pain_points'}
               />
               <PlanSection 
                 title="Engagement Strategy" sectionKey="engagement_strategy" data={plan.engagement_strategy}
                 onEdit={handleEditSection} isEditing={editingSection === 'engagement_strategy'}
                 editInput={editInput} setEditInput={setEditInput}
                 onSubmitEdit={submitEdit} onCancelEdit={() => setEditingSection(null)}
+                isLoading={isEditLoading && editingSection === 'engagement_strategy'}
               />
             </div>
           </div>
@@ -649,8 +646,8 @@ const toggleListening = () => {
   )
 }
 
-// PlanSection Component
-function PlanSection({ title, sectionKey, data, onEdit, isEditing, editInput, setEditInput, onSubmitEdit, onCancelEdit }) {
+// PlanSection Component with Loading State
+function PlanSection({ title, sectionKey, data, onEdit, isEditing, editInput, setEditInput, onSubmitEdit, onCancelEdit, isLoading }) {
   const renderTextWithLink = (text) => {
     if (typeof text === 'string' && (text.startsWith('http') || text.startsWith('www'))) {
       return <a href={text} target="_blank" rel="noopener noreferrer" style={{color: 'var(--primary-light)'}}>{text}</a>
@@ -695,14 +692,40 @@ function PlanSection({ title, sectionKey, data, onEdit, isEditing, editInput, se
     <div className="plan-section">
       <div className="section-header">
         <h3>{title}</h3>
-        <button className="edit-btn" onClick={() => onEdit(sectionKey)}>Edit</button>
+        <button className="edit-btn" onClick={() => onEdit(sectionKey)} disabled={isLoading}>
+          {isLoading ? 'Updating...' : 'Edit'}
+        </button>
       </div>
       {isEditing ? (
         <div className="edit-form">
-          <textarea value={editInput} onChange={(e) => setEditInput(e.target.value)} placeholder="Describe changes..." />
+          <textarea 
+            value={editInput} 
+            onChange={(e) => setEditInput(e.target.value)} 
+            placeholder="Describe changes..." 
+            disabled={isLoading}
+          />
           <div className="edit-actions">
-            <button className="btn btn-primary btn-sm" onClick={onSubmitEdit}>Update</button>
-            <button className="btn btn-secondary btn-sm" onClick={onCancelEdit}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={onSubmitEdit} disabled={isLoading}>
+              {isLoading ? 'Updating...' : 'Update'}
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={onCancelEdit} disabled={isLoading}>
+              Cancel
+            </button>
+          </div>
+          {isLoading && (
+            <div className="edit-loading">
+              <div className="spinner"></div>
+              <span>Updating section with AI...</span>
+            </div>
+          )}
+        </div>
+      ) : isLoading ? (
+        <div className="section-content section-loading">
+          <div className="skeleton-loader">
+            <div className="skeleton-line"></div>
+            <div className="skeleton-line short"></div>
+            <div className="skeleton-line"></div>
+            <div className="skeleton-line short"></div>
           </div>
         </div>
       ) : (

@@ -232,10 +232,21 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     section_name=data.get("section", ""),
                     edit_instructions=data.get("instructions", "")
                 )
-                await manager.send_json(session_id, {
-                    "type": "section_updated" if result.get("success") else "error",
-                    **result
-                })
+                
+                if result.get("error"):
+                    await manager.send_json(session_id, {
+                        "type": "error",
+                        "message": result["error"]
+                    })
+                else:
+                    # Send the update to the frontend
+                    await manager.send_json(session_id, {
+                        "type": "section_updated",
+                        "section": result["section"],
+                        "updated_content": result["updated_content"],
+                        "full_plan": result.get("full_plan")
+                    })
+                
                 await manager.send_json(session_id, {"type": "done"})
     
     except WebSocketDisconnect:
@@ -245,7 +256,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         if session_id in manager.active_connections:
              await manager.send_json(session_id, {"type": "error", "message": str(e)})
         manager.disconnect(session_id)
-
 
 if __name__ == "__main__":
     import uvicorn
