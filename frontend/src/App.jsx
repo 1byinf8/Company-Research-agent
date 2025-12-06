@@ -45,8 +45,9 @@ const SendIcon = () => (
   </svg>
 );
 
-const API_URL = 'http://localhost:8000'
-const WS_URL = 'ws://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Auto-detect secure/insecure websocket protocol based on API URL
+const WS_URL = API_URL.replace(/^http/, 'ws')
 
 // --- Linkify Component ---
 const Linkify = ({ text }) => {
